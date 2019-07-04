@@ -13,6 +13,7 @@ import android.os.Environment;
 import android.support.annotation.RequiresApi;
 import android.text.TextUtils;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewGroup.LayoutParams;
@@ -782,7 +783,7 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
    * Subclass of {@link WebView} that implements {@link LifecycleEventListener} interface in order
    * to call {@link WebView#destroy} on activity destroy event and also to clear the client
    */
-  protected static class RNCWebView extends WebView implements LifecycleEventListener {
+  protected static class RNCWebView extends WebView implements LifecycleEventListener, View.OnTouchListener {
     protected @Nullable
     String injectedJS;
     protected boolean messagingEnabled = false;
@@ -791,6 +792,8 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
     protected boolean sendContentSizeChangeEvents = false;
     private OnScrollDispatchHelper mOnScrollDispatchHelper;
     protected boolean hasScrollEvent = false;
+    protected int lastY = 0;
+    protected OnScrollDispatchHelper touchScrollDispatchHelper;
 
     /**
      * WebView must be created with an context of the current activity
@@ -800,6 +803,7 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
      */
     public RNCWebView(ThemedReactContext reactContext) {
       super(reactContext);
+      setOnTouchListener(this);
     }
 
     public void setSendContentSizeChangeEvents(boolean sendContentSizeChangeEvents) {
@@ -927,11 +931,55 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
 
         dispatchEvent(this, event);
       }
+      this.lastY = y;
     }
 
     protected void cleanupCallbacksAndDestroy() {
       setWebViewClient(null);
       destroy();
+    }
+
+    @Override
+    public boolean onTouch(View v, MotionEvent event) {
+
+      int x = (int) event.getX();
+      int y = (int) event.getY();
+
+      if (event.getAction() == MotionEvent.ACTION_MOVE) {
+        if (touchScrollDispatchHelper == null) touchScrollDispatchHelper = new OnScrollDispatchHelper();
+        if (this.lastY < 10 && touchScrollDispatchHelper.onScrollChanged(x, y)) {
+          ScrollEvent e = ScrollEvent.obtain(
+            this.getId(),
+            ScrollEventType.BEGIN_DRAG,
+            x,
+            y,
+            touchScrollDispatchHelper.getXFlingVelocity(),
+            touchScrollDispatchHelper.getYFlingVelocity(),
+            this.computeHorizontalScrollRange(),
+            this.computeVerticalScrollRange(),
+            this.getWidth(),
+            this.getHeight());
+
+          dispatchEvent(this, e);
+          return false;
+        }
+      }
+      if (touchScrollDispatchHelper != null) {
+        ScrollEvent e = ScrollEvent.obtain(
+          this.getId(),
+          ScrollEventType.END_DRAG,
+          x,
+          y,
+          touchScrollDispatchHelper.getXFlingVelocity(),
+          touchScrollDispatchHelper.getYFlingVelocity(),
+          this.computeHorizontalScrollRange(),
+          this.computeVerticalScrollRange(),
+          this.getWidth(),
+          this.getHeight());
+
+        dispatchEvent(this, e);
+      }
+      return false;
     }
 
     protected class RNCWebViewBridge {
